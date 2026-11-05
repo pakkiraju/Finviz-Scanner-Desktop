@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 layout.json
+session.json
 saved_scans.json
 settings.json
 build/

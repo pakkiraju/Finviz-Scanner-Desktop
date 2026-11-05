@@ -57,3 +57,52 @@ def set_window_geometry(window_key: str, x: int, y: int, w: int, h: int) -> None
     data = load_layout()
     data.setdefault("windows", {})[window_key] = {"x": x, "y": y, "w": w, "h": h}
     save_layout(data)
+
+
+def screen_name_for_widget(widget) -> str:
+    """Return Qt screen name for a widget, or empty string."""
+    try:
+        scr = widget.screen()
+        return scr.name() if scr is not None else ""
+    except Exception:
+        return ""
+
+
+def apply_geometry(
+    widget,
+    *,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    screen_name: str = "",
+) -> None:
+    """Place a window at saved coords, preferring the named screen when available."""
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtCore import QRect
+
+    w = max(400, int(w))
+    h = max(300, int(h))
+    target = None
+    if screen_name:
+        for scr in QGuiApplication.screens():
+            if scr.name() == screen_name:
+                target = scr
+                break
+
+    rect = QRect(int(x), int(y), w, h)
+    if target is not None:
+        # If the saved rect barely intersects the target screen, snap onto it.
+        if not target.geometry().intersects(rect.adjusted(20, 20, -20, -20)):
+            ag = target.availableGeometry()
+            rect = QRect(ag.x() + 40, ag.y() + 40, w, min(h, ag.height() - 80))
+    else:
+        # Clamp into the virtual desktop so the window is not lost off-screen.
+        virtual = QGuiApplication.primaryScreen()
+        if virtual is not None:
+            vg = QGuiApplication.primaryScreen().virtualGeometry()
+            if not vg.intersects(rect):
+                ag = virtual.availableGeometry()
+                rect = QRect(ag.x() + 40, ag.y() + 40, w, h)
+
+    widget.setGeometry(rect)

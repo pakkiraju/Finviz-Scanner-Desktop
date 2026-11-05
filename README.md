@@ -18,7 +18,7 @@ Requires a [Finviz Elite](https://finviz.com/elite) subscription and API key.
 3. In the app, paste your Finviz Elite API key → **Save Key**.
 4. Pick a **Signal** and/or filters, then **Open Scanner**.
 
-Your API key and saved presets are stored locally in this folder (`settings.json`, `saved_scans.json`) and are **not** committed to git. Updating the code does not wipe them.
+Your API key, saved presets, and window session live in this folder (`settings.json`, `saved_scans.json`, `session.json`) and are **not** committed to git. Updating the code does not wipe them.
 
 ## How to use
 
@@ -35,6 +35,10 @@ Get your key from Finviz Elite (account / API settings). Paste it at the top of 
 5. Click **Open Scanner** to open a live window.
 
 Green / red text in the table follows the day’s change %. Closing the main window exits the whole app and all scanner windows.
+
+### Session restore
+
+When you quit, the app remembers which scanner windows were open — including size, position, monitor, stacking order, poll interval, and always-on-top — and restores them on the next launch (requires a saved API key). Move or resize a window and it is saved automatically.
 
 ### Presets
 
@@ -69,12 +73,30 @@ Finviz Scanner Desktop/
   finideas/                          ← app package
   settings.json                      ← local (gitignored)
   saved_scans.json                   ← local (gitignored)
+  session.json                       ← local (gitignored)
   layout.json                        ← local (gitignored)
 ```
 
 ## Privacy
 
-Do not commit or share `settings.json`, `.env`, or `saved_scans.json` — they can contain your API key and personal presets. Those paths are listed in `.gitignore`.
+Do not commit or share `settings.json`, `.env`, `saved_scans.json`, or `session.json` — they can contain your API key and personal setup. Those paths are listed in `.gitignore`.
+
+## Changelog
+
+### 2026-11-04 — Session restore
+
+- Remember open scanner windows across launches (signal, filters, sort, title).
+- Restore window size, position, monitor, and stacking order.
+- Persist poll interval and always-on-top; auto-save when windows move or resize.
+- Document session restore in this README; ignore `session.json` in git.
+
+### 2026-11-04 — Initial public release
+
+- Finviz Elite CSV scanners in movable windows.
+- Full Signal list including Top Gainers/Losers timeframe presets (1M–4H, AH).
+- Filter builder, custom Performance periods, saved presets.
+- In-app API key storage; green/red day-change coloring.
+- Windows launcher: `Start Finviz Scanner Desktop.bat`.
 
 ## License
 

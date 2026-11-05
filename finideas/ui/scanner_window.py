@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from finideas.filters import MinFilters
 from finideas.finviz_client import FinvizClient, get_api_key
-from finideas.layout import get_window_geometry, set_window_geometry
+from finideas.layout import apply_geometry, get_window_geometry, set_window_geometry
 from finideas.scanners import ScannerSpec
 from finideas.ui.theme import SCANNER_NEW_ROW, TEXT_MUTED, apply_scanner_theme
 
@@ -161,7 +161,19 @@ class FetchWorker(QThread):
 
 
 class ScannerWindow(QMainWindow):
-    def __init__(self, spec: ScannerSpec, instance_id: int, parent=None) -> None:
+    layout_changed = Signal()
+
+    def __init__(
+        self,
+        spec: ScannerSpec,
+        instance_id: int,
+        parent=None,
+        *,
+        geometry: dict | None = None,
+        screen_name: str = "",
+        poll_seconds: int | None = None,
+        always_on_top: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.spec = spec
         self.instance_id = instance_id
@@ -172,6 +184,10 @@ class ScannerWindow(QMainWindow):
         self._rows: list[dict] = []
         self._sort_col = 2  # change %
         self._sort_order = Qt.SortOrder.DescendingOrder
+        self._layout_save_timer = QTimer(self)
+        self._layout_save_timer.setSingleShot(True)
+        self._layout_save_timer.setInterval(400)
+        self._layout_save_timer.timeout.connect(self.layout_changed.emit)
 
         self.setWindowTitle(f"{spec.title} #{instance_id}")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -186,7 +202,7 @@ class ScannerWindow(QMainWindow):
         controls = QHBoxLayout()
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(5, 600)
-        self.interval_spin.setValue(15)
+        self.interval_spin.setValue(15 if poll_seconds is None else int(poll_seconds))
         self.interval_spin.setSuffix(" s")
         controls.addWidget(QLabel("Poll"))
         controls.addWidget(self.interval_spin)
@@ -194,6 +210,12 @@ class ScannerWindow(QMainWindow):
         self.always_on_top = QCheckBox("Always on top")
         self.always_on_top.toggled.connect(self._toggle_on_top)
         controls.addWidget(self.always_on_top)
+        if always_on_top:
+            self.always_on_top.blockSignals(True)
+            self.always_on_top.setChecked(True)
+            self.always_on_top.blockSignals(False)
+            flags = self.windowFlags()
+            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
 
         self.apply_btn = QPushButton("Refresh")
         self.apply_btn.clicked.connect(self.refresh_now)
@@ -230,9 +252,26 @@ class ScannerWindow(QMainWindow):
         self._timer.timeout.connect(self.refresh_now)
         self.interval_spin.valueChanged.connect(self._restart_timer)
 
-        geo = get_window_geometry(self.window_key)
-        if geo:
-            self.setGeometry(geo["x"], geo["y"], geo["w"], geo["h"])
+        if geometry:
+            apply_geometry(
+                self,
+                x=int(geometry.get("x", 100)),
+                y=int(geometry.get("y", 100)),
+                w=int(geometry.get("w", 780)),
+                h=int(geometry.get("h", 520)),
+                screen_name=screen_name,
+            )
+        else:
+            geo = get_window_geometry(self.window_key)
+            if geo:
+                apply_geometry(
+                    self,
+                    x=geo["x"],
+                    y=geo["y"],
+                    w=geo["w"],
+                    h=geo["h"],
+                    screen_name=screen_name,
+                )
 
         self._restart_timer()
         QTimer.singleShot(200, self.refresh_now)
@@ -329,6 +368,14 @@ class ScannerWindow(QMainWindow):
             return
         QGuiApplication.clipboard().setText(ticker)
         self.status.setText(f"Copied {ticker}")
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        self._layout_save_timer.start()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._layout_save_timer.start()
 
     def closeEvent(self, event) -> None:
         geo = self.geometry()

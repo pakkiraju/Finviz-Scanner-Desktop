@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from finideas.finviz_client import get_api_key
+from finideas.layout import apply_geometry, screen_name_for_widget
 from finideas.saved_scans import (
     SavedScan,
     delete_scan,
@@ -28,6 +29,7 @@ from finideas.saved_scans import (
     upsert_scan,
 )
 from finideas.scanners import make_custom_spec
+from finideas.session import SessionScanner, SessionState, load_session, save_session
 from finideas.settings import get_finviz_api_key, set_finviz_api_key
 from finideas.ui.filter_panel import FilterPanel
 from finideas.ui.scanner_window import ScannerWindow
@@ -125,6 +127,7 @@ class LauncherWindow(QMainWindow):
         layout.addWidget(self.filter_panel, 1)
 
         self.reload_saved_list()
+        QTimer.singleShot(0, self._restore_session)
 
     def _toggle_api_visibility(self, show: bool) -> None:
         self.api_edit.setEchoMode(
@@ -331,12 +334,34 @@ class LauncherWindow(QMainWindow):
         )
         self._open_window(spec)
 
-    def _open_window(self, spec) -> None:
-        win = ScannerWindow(spec, self._next_id)
+    def _open_window(
+        self,
+        spec,
+        *,
+        geometry: dict | None = None,
+        screen_name: str = "",
+        poll_seconds: int | None = None,
+        always_on_top: bool = False,
+        persist: bool = True,
+    ) -> ScannerWindow:
+        win = ScannerWindow(
+            spec,
+            self._next_id,
+            geometry=geometry,
+            screen_name=screen_name,
+            poll_seconds=poll_seconds,
+            always_on_top=always_on_top,
+        )
         self._next_id += 1
         self._windows.append(win)
         win.destroyed.connect(lambda _=None, w=win: self._on_closed(w))
+        win.layout_changed.connect(self._persist_session)
+        win.always_on_top.toggled.connect(lambda _=False: self._persist_session())
+        win.interval_spin.valueChanged.connect(lambda _=0: self._persist_session())
         win.show()
+        if persist and not self._closing_app:
+            self._persist_session()
+        return win
 
     def _on_closed(self, win: ScannerWindow) -> None:
         if self._closing_app:
@@ -345,9 +370,83 @@ class LauncherWindow(QMainWindow):
             self._windows.remove(win)
         except ValueError:
             pass
+        self._persist_session()
+
+    def _restore_session(self) -> None:
+        state = load_session()
+        if state.launcher:
+            apply_geometry(
+                self,
+                x=state.launcher["x"],
+                y=state.launcher["y"],
+                w=state.launcher["w"],
+                h=state.launcher["h"],
+            )
+        if not state.scanners:
+            return
+        if not get_api_key():
+            return
+        # Open in saved stacking order (first = bottom, last = top).
+        for entry in sorted(state.scanners, key=lambda s: s.order):
+            if not entry.signal and not entry.filters:
+                continue
+            spec = make_custom_spec(
+                title=entry.title,
+                filters=entry.filters,
+                sort=entry.sort,
+                signal=entry.signal,
+                instance_id=self._next_id,
+            )
+            self._open_window(
+                spec,
+                geometry={
+                    "x": entry.x,
+                    "y": entry.y,
+                    "w": entry.w,
+                    "h": entry.h,
+                },
+                screen_name=entry.screen,
+                poll_seconds=entry.poll_seconds,
+                always_on_top=entry.always_on_top,
+                persist=False,
+            )
+        self._persist_session()
+
+    def _persist_session(self) -> None:
+        scanners: list[SessionScanner] = []
+        for order, win in enumerate(self._windows):
+            geo = win.geometry()
+            scanners.append(
+                SessionScanner(
+                    title=win.spec.title,
+                    signal=win.spec.signal or "",
+                    filters=list(win.spec.base_filters),
+                    sort=win.spec.sort or "-change",
+                    x=geo.x(),
+                    y=geo.y(),
+                    w=geo.width(),
+                    h=geo.height(),
+                    screen=screen_name_for_widget(win),
+                    poll_seconds=int(win.interval_spin.value()),
+                    always_on_top=bool(win.always_on_top.isChecked()),
+                    order=order,
+                )
+            )
+        lgeo = self.geometry()
+        state = SessionState(
+            launcher={
+                "x": lgeo.x(),
+                "y": lgeo.y(),
+                "w": lgeo.width(),
+                "h": lgeo.height(),
+            },
+            scanners=scanners,
+        )
+        save_session(state)
 
     def closeEvent(self, event) -> None:
-        # Closing the launcher exits the whole app and all scanner windows.
+        # Snapshot open scanners (positions / screens / order) before teardown.
+        self._persist_session()
         self._closing_app = True
         for w in list(self._windows):
             w.close()
