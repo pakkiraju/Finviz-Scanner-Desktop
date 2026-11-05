@@ -30,7 +30,7 @@ Get your key from Finviz Elite (account / API settings). Paste it at the top of 
 
 1. Choose a **Signal** (e.g. Top Gainers, Top Gainers 5M, Unusual Volume, chart patterns).
 2. Set filters on the Descriptive / Fundamental / Technical / News tabs. **Any** = not applied; changed filters highlight.
-3. **Performance → Custom…** (and Performance 2) lets you set intraday periods (1m / 2m / 5m / …) and From/To %.
+3. Open **Custom…** at the bottom of any numeric filter (Price, Volume, P/E, RSI, Performance, 52-Week High/Low, Gap, and more) to enter your own From/To range — same as Finviz Elite. Performance / Performance 2 also let you pick the period (1m / 2m / 5m / …).
 4. Optionally set **Sort** and a **Name** for the scanner window title.
 5. Click **Open Scanner** to open a live window.
 
@@ -82,6 +82,12 @@ Finviz Scanner Desktop/
 Do not commit or share `settings.json`, `.env`, `saved_scans.json`, or `session.json` — they can contain your API key and personal setup. Those paths are listed in `.gitignore`.
 
 ## Changelog
+
+### 2026-11-04 — Custom… on all numeric filters
+
+- Add Finviz Elite **Custom…** From/To ranges to Price, Volume, Float, Market Cap, fundamentals (P/E, margins, …), RSI, ATR, Beta, Gap, Change, and High/Low distance filters.
+- Keep Performance / Performance 2 custom periods (1m–YTD).
+- High/Low Custom supports Below High / Above Low modes.
 
 ### 2026-11-04 — Session restore
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from finideas.custom_range import CUSTOM_SENTINEL, CustomRangeSpec
+
 
 @dataclass(frozen=True)
 class FilterOption:
@@ -21,6 +23,7 @@ class FilterField:
     label: str
     category: str  # Descriptive | Fundamental | Technical | News
     options: tuple[FilterOption, ...]
+    custom: CustomRangeSpec | None = None
 
 
 def _any() -> FilterOption:
@@ -45,6 +48,45 @@ def _ou(
     for o in overs:
         items.append((f"Over {o}", f"{prefix}o{o}"))
     return _opts(*items)
+
+
+def _cr(prefix: str, unit: str = "", **kwargs) -> CustomRangeSpec:
+    return CustomRangeSpec(kind="range", prefix=prefix, unit=unit, **kwargs)
+
+
+def _hl(prefix: str) -> CustomRangeSpec:
+    return CustomRangeSpec(
+        kind="highlow",
+        prefix=prefix,
+        unit="%",
+        modes=(("Below High", "bhx"), ("Above Low", "alx")),
+    )
+
+
+def _attach_customs(
+    fields: tuple[FilterField, ...],
+    specs: dict[str, CustomRangeSpec],
+) -> tuple[FilterField, ...]:
+    """Append Custom… and attach CustomRangeSpec for Elite custom ranges."""
+    out: list[FilterField] = []
+    for f in fields:
+        spec = specs.get(f.id)
+        if spec is None:
+            out.append(f)
+            continue
+        opts = []
+        saw_custom = False
+        for o in f.options:
+            if o.code in (CUSTOM_SENTINEL, "__custom_perf__", "__custom_perf2__"):
+                if not saw_custom:
+                    opts.append(FilterOption("Custom…", CUSTOM_SENTINEL))
+                    saw_custom = True
+                continue
+            opts.append(o)
+        if not saw_custom:
+            opts.append(FilterOption("Custom…", CUSTOM_SENTINEL))
+        out.append(FilterField(f.id, f.label, f.category, tuple(opts), spec))
+    return tuple(out)
 
 
 # ---------------------------------------------------------------------------
@@ -117,10 +159,10 @@ SIGNAL_OPTIONS: tuple[FilterOption, ...] = _opts(
 )
 
 # ---------------------------------------------------------------------------
-# Field catalog
+# Field catalog (base options; Custom… attached via _attach_customs below)
 # ---------------------------------------------------------------------------
 
-FILTER_FIELDS: tuple[FilterField, ...] = (
+_FILTER_FIELDS_BASE: tuple[FilterField, ...] = (
     # ----- Descriptive -----
     FilterField(
         "exchange",
@@ -1094,6 +1136,56 @@ FILTER_FIELDS: tuple[FilterField, ...] = (
 
 CATEGORIES = ("Descriptive", "Fundamental", "Technical", "News")
 
+# Elite Custom… ranges — every Finviz numeric Under/Over-style filter that
+# accepts From/To in the website UI.
+_CUSTOM_SPECS: dict[str, CustomRangeSpec] = {
+    # Descriptive
+    "market_cap": _cr("cap_", "$B"),
+    "price": _cr("sh_price_", "$"),
+    "avg_volume": _cr("sh_avgvol_", "K"),
+    "rel_volume": _cr("sh_relvol_", "x"),
+    "cur_volume": _cr("sh_curvol_", "K"),
+    "float": _cr("sh_float_", "M"),
+    "shares_outstanding": _cr("sh_outstanding_", "M"),
+    "short_float": _cr("sh_short_", "%"),
+    # Fundamental
+    "pe": _cr("fa_pe_"),
+    "forward_pe": _cr("fa_fpe_"),
+    "peg": _cr("fa_peg_"),
+    "ps": _cr("fa_ps_"),
+    "pb": _cr("fa_pb_"),
+    "pc": _cr("fa_pc_"),
+    "pfcf": _cr("fa_pfcf_"),
+    "evebitda": _cr("fa_evebitda_"),
+    "div_yield": _cr("fa_div_", "%"),
+    "eps_q_oq": _cr("fa_epsqoq_", "%"),
+    "sales_q_oq": _cr("fa_salesqoq_", "%"),
+    "eps_this_y": _cr("fa_epsyoy_", "%"),
+    "roe": _cr("fa_roe_", "%"),
+    "roa": _cr("fa_roa_", "%"),
+    "debt_eq": _cr("fa_debteq_"),
+    "gross_margin": _cr("fa_grossmargin_", "%"),
+    "oper_margin": _cr("fa_opermargin_", "%"),
+    "net_margin": _cr("fa_netmargin_", "%"),
+    "inst_own": _cr("sh_instown_", "%"),
+    "insider_own": _cr("sh_insiderown_", "%"),
+    # Technical
+    "performance": CustomRangeSpec(kind="perf", prefix="ta_perf", unit="%"),
+    "performance2": CustomRangeSpec(kind="perf2", prefix="ta_perf2", unit="%"),
+    "rsi": _cr("ta_rsi_"),
+    "atr": _cr("ta_averagetruerange_"),
+    "beta": _cr("ta_beta_"),
+    "highlow52w": _hl("ta_highlow52w_"),
+    "highlow20d": _hl("ta_highlow20d_"),
+    "highlow50d": _hl("ta_highlow50d_"),
+    "alltime": _hl("ta_alltime_"),
+    "gap": _cr("ta_gap_", "%"),
+    "change": _cr("ta_change_", "%"),
+    "change_open": _cr("ta_changeopen_", "%"),
+}
+
+FILTER_FIELDS: tuple[FilterField, ...] = _attach_customs(_FILTER_FIELDS_BASE, _CUSTOM_SPECS)
+
 SORT_OPTIONS: tuple[FilterOption, ...] = (
     FilterOption("Change % (desc)", "-change"),
     FilterOption("Change % (asc)", "change"),
@@ -1109,3 +1201,10 @@ SORT_OPTIONS: tuple[FilterOption, ...] = (
 
 def fields_by_category(category: str) -> tuple[FilterField, ...]:
     return tuple(f for f in FILTER_FIELDS if f.category == category)
+
+
+def field_by_id(field_id: str) -> FilterField | None:
+    for f in FILTER_FIELDS:
+        if f.id == field_id:
+            return f
+    return None

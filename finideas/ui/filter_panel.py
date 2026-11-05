@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,11 +16,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from finideas.custom_perf import (
-    CUSTOM_PERF2_SENTINEL,
-    CUSTOM_PERF_SENTINEL,
-    describe_custom_perf_code,
-    is_custom_perf_code,
+from finideas.custom_perf import describe_custom_perf_code, is_custom_perf_code
+from finideas.custom_range import (
+    CUSTOM_SENTINEL,
+    describe_highlow_code,
+    describe_range_code,
+    looks_like_custom_range,
 )
 from finideas.filter_catalog import (
     CATEGORIES,
@@ -30,10 +30,17 @@ from finideas.filter_catalog import (
     SORT_OPTIONS,
     FilterField,
     FilterOption,
+    field_by_id,
     fields_by_category,
 )
-from finideas.ui.custom_perf_dialog import CustomPerfDialog
-from finideas.ui.theme import ACTIVE_TEXT, TEXT_DIM, TEXT_MUTED, combo_stylesheet
+from finideas.ui.custom_range_dialog import CustomRangeDialog
+from finideas.ui.theme import TEXT_DIM, TEXT_MUTED, combo_stylesheet
+
+
+def _is_sentinel(code: str) -> bool:
+    return code in (CUSTOM_SENTINEL, "__custom_perf__", "__custom_perf2__") or code.startswith(
+        "__custom"
+    )
 
 
 class FilterCombo(QComboBox):
@@ -61,7 +68,7 @@ class FilterCombo(QComboBox):
         if not self._highlight_when_set:
             return False
         code = self.code()
-        return bool(code) and not code.startswith("__custom_perf")
+        return bool(code) and not _is_sentinel(code)
 
     def _refresh_active_style(self) -> None:
         active = self.is_active()
@@ -90,11 +97,39 @@ def _ensure_option(combo: FilterCombo, label: str, code: str) -> int:
     insert_at = combo.count()
     for i in range(combo.count()):
         data = str(combo.itemData(i) or "")
-        if data.startswith("__custom_perf"):
+        if _is_sentinel(data):
             insert_at = i
             break
     combo.insertItem(insert_at, label, code)
     return insert_at
+
+
+def _describe_custom(field: FilterField, code: str) -> str:
+    spec = field.custom
+    if spec is None:
+        return describe_custom_perf_code(code) or code
+    if spec.kind in ("perf", "perf2"):
+        return describe_custom_perf_code(code) or code
+    if spec.kind == "highlow":
+        return describe_highlow_code(spec.prefix, code) or code
+    return describe_range_code(spec.prefix, code, unit=spec.unit) or code
+
+
+def _code_is_custom_for_field(field: FilterField, code: str) -> bool:
+    if not code:
+        return False
+    # Already a labeled option?
+    for opt in field.options:
+        if opt.code == code and not _is_sentinel(opt.code):
+            return False
+    spec = field.custom
+    if spec is None:
+        return is_custom_perf_code(code)
+    if spec.kind in ("perf", "perf2"):
+        return is_custom_perf_code(code)
+    if spec.kind == "highlow":
+        return bool(describe_highlow_code(spec.prefix, code))
+    return looks_like_custom_range(spec.prefix, code)
 
 
 class FilterPanel(QWidget):
@@ -106,6 +141,7 @@ class FilterPanel(QWidget):
         self._views: dict[str, list[FilterCombo]] = {}
         self._field_labels: dict[str, list[QLabel]] = {}
         self._prev_index: dict[str, int] = {}
+        self._fields: dict[str, FilterField] = {f.id: f for f in FILTER_FIELDS}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -133,7 +169,6 @@ class FilterPanel(QWidget):
             self._views[field.id] = []
             self._field_labels[field.id] = []
             self._prev_index[field.id] = 0
-            # Masters are not shown; views drive the UI. Still watch masters for programmatic changes.
             master.currentIndexChanged.connect(
                 lambda idx, fid=field.id, c=master: self._on_combo_index(fid, c, idx)
             )
@@ -186,7 +221,6 @@ class FilterPanel(QWidget):
             view.setCurrentIndex(master.currentIndex())
             view._refresh_active_style()
             _link_combos(master, view)
-            # Views are what the user clicks — must handle Custom… here (masters are hidden).
             view.currentIndexChanged.connect(
                 lambda idx, fid=field.id, c=view: self._on_combo_index(fid, c, idx)
             )
@@ -204,29 +238,30 @@ class FilterPanel(QWidget):
         return scroll
 
     def _on_combo_index(self, field_id: str, combo: FilterCombo, idx: int) -> None:
-        # Ignore sync updates that blocked signals on other combos; only react when
-        # this combo is the one the user (or apply_settings) actually changed.
         if combo.signalsBlocked():
             return
         code = str(combo.itemData(idx) or "")
-        if code in (CUSTOM_PERF_SENTINEL, CUSTOM_PERF2_SENTINEL):
-            self._prompt_custom_perf(field_id, code)
-            return
-        if code.startswith("__custom_perf"):
+        if _is_sentinel(code):
+            self._prompt_custom(field_id)
             return
         self._prev_index[field_id] = idx
         self._style_field_label(field_id)
         self._refresh_summary()
 
-    def _prompt_custom_perf(self, field_id: str, sentinel: str) -> None:
-        # Guard against All + category tabs both firing for linked combos.
+    def _prompt_custom(self, field_id: str) -> None:
         if getattr(self, "_custom_dialog_open", False):
+            return
+        field = self._fields.get(field_id) or field_by_id(field_id)
+        if field is None or field.custom is None:
+            self._revert_field(field_id)
             return
         self._custom_dialog_open = True
         try:
-            prefix = "ta_perf2" if sentinel == CUSTOM_PERF2_SENTINEL else "ta_perf"
-            title = "Custom Performance 2" if prefix == "ta_perf2" else "Custom Performance"
-            dlg = CustomPerfDialog(self, title=title, prefix=prefix)
+            dlg = CustomRangeDialog(
+                self,
+                title=f"Custom {field.label}",
+                spec=field.custom,
+            )
             if dlg.exec() != QDialog.DialogCode.Accepted:
                 self._revert_field(field_id)
                 return
@@ -264,7 +299,7 @@ class FilterPanel(QWidget):
 
     def _style_field_label(self, field_id: str) -> None:
         code = self._masters[field_id].code()
-        active = bool(code) and not code.startswith("__custom_perf")
+        active = bool(code) and not _is_sentinel(code)
         if active:
             style = "color: #fbbf24; font-weight: 700;"
         else:
@@ -279,7 +314,7 @@ class FilterPanel(QWidget):
         for field in FILTER_FIELDS:
             combo = self._masters[field.id]
             code = combo.code()
-            if code and not code.startswith("__custom_perf"):
+            if code and not _is_sentinel(code):
                 parts.append(f"{field.label}: {combo.currentText()}")
         if parts:
             self.summary.setText(" · ".join(parts))
@@ -292,7 +327,7 @@ class FilterPanel(QWidget):
         out: list[str] = []
         for f in FILTER_FIELDS:
             code = self._masters[f.id].code()
-            if code and not code.startswith("__custom_perf"):
+            if code and not _is_sentinel(code):
                 out.append(code)
         return out
 
@@ -313,13 +348,13 @@ class FilterPanel(QWidget):
             combo = self._masters.get(field_id)
             if combo:
                 code = combo.code()
-                if code and not code.startswith("__custom_perf"):
+                if code and not _is_sentinel(code):
                     bits.append(combo.currentText())
         if not bits:
             for field in FILTER_FIELDS:
                 combo = self._masters[field.id]
                 code = combo.code()
-                if code and not code.startswith("__custom_perf"):
+                if code and not _is_sentinel(code):
                     bits.append(f"{field.label} {combo.currentText()}")
                 if len(bits) >= 2:
                     break
@@ -332,7 +367,7 @@ class FilterPanel(QWidget):
         out: dict[str, str] = {}
         for field in FILTER_FIELDS:
             code = self._masters[field.id].code()
-            if code and not code.startswith("__custom_perf"):
+            if code and not _is_sentinel(code):
                 out[field.id] = code
         return out
 
@@ -359,7 +394,12 @@ class FilterPanel(QWidget):
         self._set_combo_by_code(self.sort_combo, sort or "-change")
         for field_id, code in (filters or {}).items():
             master = self._masters.get(field_id)
+            field = self._fields.get(field_id)
             if not master or not code:
+                continue
+            if field and _code_is_custom_for_field(field, code):
+                label = _describe_custom(field, code)
+                self._apply_custom_code(field_id, label, code)
                 continue
             if is_custom_perf_code(code):
                 label = describe_custom_perf_code(code) or code
