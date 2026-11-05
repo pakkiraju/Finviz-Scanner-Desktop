@@ -73,6 +73,34 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _scans_from_payload(data: Any) -> list[SavedScan]:
+    """Parse a shared config payload into SavedScan objects (new ids if missing)."""
+    items: list[Any]
+    if isinstance(data, dict):
+        if isinstance(data.get("scans"), list):
+            items = data["scans"]
+        elif data.get("name"):
+            items = [data]
+        else:
+            return []
+    elif isinstance(data, list):
+        items = data
+    else:
+        return []
+
+    out: list[SavedScan] = []
+    for raw in items:
+        if isinstance(raw, dict):
+            # Fresh id so importing someone else's file never collides by id.
+            raw = dict(raw)
+            raw["id"] = str(uuid.uuid4())
+            scan = SavedScan.from_dict(raw)
+            if scan:
+                out.append(scan)
+    out.sort(key=lambda s: s.name.lower())
+    return out
+
+
 def load_saved_scans() -> list[SavedScan]:
     path = _saved_scans_path()
     if not path.exists():
@@ -82,6 +110,7 @@ def load_saved_scans() -> list[SavedScan]:
     except Exception as e:
         logger.warning("Could not read saved_scans.json: %s", e)
         return []
+    # Keep original ids when reading the local file.
     items = data.get("scans") if isinstance(data, dict) else None
     if not isinstance(items, list):
         return []
@@ -93,6 +122,55 @@ def load_saved_scans() -> list[SavedScan]:
                 out.append(scan)
     out.sort(key=lambda s: s.name.lower())
     return out
+
+
+def load_scans_from_file(path: Path | str) -> list[SavedScan]:
+    """Load presets from a shared JSON file (saved_scans.json format or a single scan)."""
+    p = Path(path)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(f"Could not read JSON: {e}") from e
+    scans = _scans_from_payload(data)
+    if not scans:
+        raise ValueError(
+            "No scanner presets found. Share a saved_scans.json file "
+            '(or a JSON object with a "scans" list).'
+        )
+    return scans
+
+
+def import_scans(
+    incoming: list[SavedScan],
+    *,
+    overwrite_names: bool = True,
+) -> tuple[list[SavedScan], int, int]:
+    """
+    Merge imported presets into the local saved_scans.json.
+
+    Returns (all_scans, imported_count, skipped_count).
+    """
+    scans = load_saved_scans()
+    imported = 0
+    skipped = 0
+    for scan in incoming:
+        existing = find_by_name(scans, scan.name)
+        if existing:
+            if not overwrite_names:
+                skipped += 1
+                continue
+            scan.id = existing.id
+            scan.updated_at = _now_iso()
+            scans = [scan if s.id == existing.id else s for s in scans]
+        else:
+            if not scan.id:
+                scan.id = str(uuid.uuid4())
+            scan.updated_at = _now_iso()
+            scans.append(scan)
+        imported += 1
+    scans.sort(key=lambda s: s.name.lower())
+    save_saved_scans(scans)
+    return scans, imported, skipped
 
 
 def save_saved_scans(scans: list[SavedScan]) -> None:

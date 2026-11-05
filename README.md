@@ -50,8 +50,15 @@ Use the **Presets** row at the top:
 | **Edit Preset** | Load that preset into the filter editor |
 | **Delete Preset** | Remove the selected preset |
 | **Save Preset** | Save the current Signal + filters under a name |
+| **Load Config** | Import presets from a shared `saved_scans.json` (browse Downloads, etc.) |
 | **Open Scanner** | Open a scanner from the current (unsaved) filters |
 | **Reset Filters** | Clear Signal and all filters back to Any |
+
+### Sharing presets
+
+Presets live in **`saved_scans.json`** in the app folder. Share that file with another user (email, Discord, USB, etc.). They click **Load Config**, pick the file, and the presets appear in their dropdown — then **Open Preset** or **Edit Preset** as usual.
+
+Do **not** share `settings.json` — that file can contain your Finviz API key.
 
 ## Manual install (optional)
 
@@ -82,6 +89,11 @@ Finviz Scanner Desktop/
 Do not commit or share `settings.json`, `.env`, `saved_scans.json`, or `session.json` — they can contain your API key and personal setup. Those paths are listed in `.gitignore`.
 
 ## Changelog
+
+### 2026-11-05 — Load Config (share presets)
+
+- **Load Config** on the Presets row imports a shared `saved_scans.json` from any folder.
+- Document sharing presets via that file (not `settings.json` / API key).
 
 ### 2026-11-04 — Custom… on all numeric filters
 

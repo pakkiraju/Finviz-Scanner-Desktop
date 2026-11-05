@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -25,7 +27,9 @@ from finideas.saved_scans import (
     SavedScan,
     delete_scan,
     find_by_name,
+    import_scans,
     load_saved_scans,
+    load_scans_from_file,
     upsert_scan,
 )
 from finideas.scanners import make_custom_spec
@@ -112,6 +116,13 @@ class LauncherWindow(QMainWindow):
         save_btn = self._secondary_btn("Save Preset")
         save_btn.clicked.connect(self.save_current)
         presets_row.addWidget(save_btn)
+
+        load_config_btn = self._secondary_btn("Load Config")
+        load_config_btn.setToolTip(
+            "Import scanner presets from a shared saved_scans.json file"
+        )
+        load_config_btn.clicked.connect(self.load_config_file)
+        presets_row.addWidget(load_config_btn)
 
         self.open_custom_btn = QPushButton("Open Scanner")
         self.open_custom_btn.setDefault(True)
@@ -270,6 +281,83 @@ class LauncherWindow(QMainWindow):
             sort=scan.sort,
             filters=scan.filters,
         )
+
+    def load_config_file(self) -> None:
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load scanner config",
+            str(Path.home() / "Downloads"),
+            "Scanner config (*.json);;All files (*.*)",
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        try:
+            incoming = load_scans_from_file(path)
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid config", str(e))
+            return
+        except OSError as e:
+            QMessageBox.critical(self, "Could not open file", str(e))
+            return
+
+        conflicts = [
+            s.name for s in incoming if find_by_name(self._saved, s.name) is not None
+        ]
+        overwrite = True
+        if conflicts:
+            shown = ", ".join(conflicts[:8])
+            extra = f" (+{len(conflicts) - 8} more)" if len(conflicts) > 8 else ""
+            ans = QMessageBox.question(
+                self,
+                "Name conflicts",
+                f"{len(conflicts)} preset name(s) already exist:\n{shown}{extra}\n\n"
+                "Overwrite those presets?\n"
+                "(No = skip conflicts and import the rest)",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if ans == QMessageBox.StandardButton.Cancel:
+                return
+            overwrite = ans == QMessageBox.StandardButton.Yes
+
+        try:
+            self._saved, imported, skipped = import_scans(
+                incoming, overwrite_names=overwrite
+            )
+        except OSError as e:
+            QMessageBox.critical(self, "Import failed", str(e))
+            return
+
+        self.reload_saved_list()
+        if imported:
+            conflict_set = {n.lower() for n in conflicts}
+            if overwrite:
+                applied_name = incoming[0].name
+            else:
+                applied_name = next(
+                    (s.name for s in incoming if s.name.lower() not in conflict_set),
+                    None,
+                )
+            if applied_name:
+                for i in range(self.saved_combo.count()):
+                    if self.saved_combo.itemText(i) == applied_name:
+                        self.saved_combo.setCurrentIndex(i)
+                        break
+                selected = self._selected_saved()
+                if selected:
+                    self.filter_panel.apply_settings(
+                        name=selected.name,
+                        signal=selected.signal,
+                        sort=selected.sort,
+                        filters=selected.filters,
+                    )
+
+        msg = f"Imported {imported} preset(s) from {path.name}."
+        if skipped:
+            msg += f" Skipped {skipped} name conflict(s)."
+        QMessageBox.information(self, "Config loaded", msg)
 
     def open_saved(self) -> None:
         if not get_api_key():
