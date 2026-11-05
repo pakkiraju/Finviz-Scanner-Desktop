@@ -1,0 +1,81 @@
+# Finviz Scanner Desktop
+
+Desktop day-trading scanners for **Finviz Elite**. Build Finviz-style screens (Signal + filters), save presets, and open each scan in its own movable window with live CSV refresh.
+
+Requires a [Finviz Elite](https://finviz.com/elite) subscription and API key.
+
+## Requirements
+
+- Windows
+- [Python 3.13+](https://www.python.org/downloads/) (check **Add python.exe to PATH** when installing)
+- Finviz Elite API key
+
+## Quick start
+
+1. Download or clone this repo.
+2. Double-click **`Start Finviz Scanner Desktop.bat`**.
+   - First run creates a virtual environment and installs dependencies.
+3. In the app, paste your Finviz Elite API key → **Save Key**.
+4. Pick a **Signal** and/or filters, then **Open Scanner**.
+
+Your API key and saved presets are stored locally in this folder (`settings.json`, `saved_scans.json`) and are **not** committed to git. Updating the code does not wipe them.
+
+## How to use
+
+### API key
+
+Get your key from Finviz Elite (account / API settings). Paste it at the top of the main window and click **Save Key**. The status line should show **Key saved**.
+
+### Build a scan
+
+1. Choose a **Signal** (e.g. Top Gainers, Top Gainers 5M, Unusual Volume, chart patterns).
+2. Set filters on the Descriptive / Fundamental / Technical / News tabs. **Any** = not applied; changed filters highlight.
+3. **Performance → Custom…** (and Performance 2) lets you set intraday periods (1m / 2m / 5m / …) and From/To %.
+4. Optionally set **Sort** and a **Name** for the scanner window title.
+5. Click **Open Scanner** to open a live window.
+
+Green / red text in the table follows the day’s change %. Closing the main window exits the whole app and all scanner windows.
+
+### Presets
+
+Use the **Presets** row at the top:
+
+| Button | What it does |
+|--------|----------------|
+| **Open Preset** | Open the selected saved scan in a new window |
+| **Edit Preset** | Load that preset into the filter editor |
+| **Delete Preset** | Remove the selected preset |
+| **Save Preset** | Save the current Signal + filters under a name |
+| **Open Scanner** | Open a scanner from the current (unsaved) filters |
+| **Reset Filters** | Clear Signal and all filters back to Any |
+
+## Manual install (optional)
+
+If you prefer not to use the `.bat` file:
+
+```bat
+py -3.13 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe main.py
+```
+
+## Project layout
+
+```
+Finviz Scanner Desktop/
+  Start Finviz Scanner Desktop.bat   ← double-click to run
+  main.py
+  requirements.txt
+  finideas/                          ← app package
+  settings.json                      ← local (gitignored)
+  saved_scans.json                   ← local (gitignored)
+  layout.json                        ← local (gitignored)
+```
+
+## Privacy
+
+Do not commit or share `settings.json`, `.env`, or `saved_scans.json` — they can contain your API key and personal presets. Those paths are listed in `.gitignore`.
+
+## License
+
+Use at your own risk. Finviz is a trademark of its respective owner; this project is not affiliated with Finviz.

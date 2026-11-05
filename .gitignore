@@ -1,0 +1,11 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+layout.json
+saved_scans.json
+settings.json
+build/
+dist/
+*.spec
+*.spec.bak
