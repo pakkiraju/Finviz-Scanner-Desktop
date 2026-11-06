@@ -283,6 +283,27 @@ QSpinBox {{
     border-radius: 4px;
     padding: 3px 6px;
 }}
+QSlider::groove:horizontal {{
+    border: 1px solid {BORDER};
+    height: 6px;
+    background: {SCANNER_INPUT};
+    border-radius: 3px;
+}}
+QSlider::handle:horizontal {{
+    background: {ACCENT};
+    border: 1px solid {ACCENT_HOVER};
+    width: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}}
+QSlider::sub-page:horizontal {{
+    background: {ACCENT};
+    border-radius: 3px;
+}}
+QSlider::add-page:horizontal {{
+    background: {BORDER_SOFT};
+    border-radius: 3px;
+}}
 QTableView {{
     background-color: {SCANNER_RAISED};
     alternate-background-color: {SCANNER_ALT_ROW};

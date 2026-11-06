@@ -15,17 +15,62 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QSlider,
     QSpinBox,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
+from finideas.alert_sound import play_bell
 from finideas.filters import MinFilters
 from finideas.finviz_client import FinvizClient, get_api_key
 from finideas.layout import apply_geometry, get_window_geometry, set_window_geometry
 from finideas.scanners import ScannerSpec
-from finideas.ui.theme import SCANNER_NEW_ROW, TEXT_MUTED, apply_scanner_theme
+from finideas.ui.theme import (
+    ACCENT,
+    ACCENT_HOVER,
+    SCANNER_NEW_ROW,
+    TEXT,
+    TEXT_MUTED,
+    apply_scanner_theme,
+)
+
+# Cap ding spam when a refresh drops in many new names at once.
+_MAX_ALERT_DINGS = 8
+_ALERT_DING_GAP_MS = 180
+_DEFAULT_ALERT_VOLUME = 70
+
+# ON = same blue as Refresh/Pause; OFF = darker navy.
+_SOUND_ON_STYLE = f"""
+QPushButton {{
+    background-color: {ACCENT};
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+QPushButton:hover {{
+    background-color: {ACCENT_HOVER};
+}}
+"""
+_SOUND_OFF_STYLE = """
+QPushButton {
+    background-color: #0a1624;
+    color: #6f879c;
+    border: 1px solid #1e3a55;
+    border-radius: 5px;
+    padding: 6px 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background-color: #12283f;
+    color: #9ab4c8;
+}
+"""
 
 # Day change colors (readable on dark navy)
 _GREEN = QColor("#22c55e")
@@ -33,6 +78,7 @@ _RED = QColor("#ef4444")
 _FLAT = QColor("#d6e4f0")
 
 logger = logging.getLogger(__name__)
+
 
 COLUMNS = [
     ("ticker", "Ticker"),
@@ -173,6 +219,8 @@ class ScannerWindow(QMainWindow):
         screen_name: str = "",
         poll_seconds: int | None = None,
         always_on_top: bool = False,
+        sound_alerts: bool = False,
+        alert_volume: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.spec = spec
@@ -181,6 +229,8 @@ class ScannerWindow(QMainWindow):
         self._prev_tickers: set[str] = set()
         self._worker: FetchWorker | None = None
         self._paused = False
+        self._sound_alerts = False
+        self._suppress_preview = True
         self._rows: list[dict] = []
         self._sort_col = 2  # change %
         self._sort_order = Qt.SortOrder.DescendingOrder
@@ -225,6 +275,38 @@ class ScannerWindow(QMainWindow):
         self.pause_btn.setCheckable(True)
         self.pause_btn.toggled.connect(self._toggle_pause)
         controls.addWidget(self.pause_btn)
+
+        self.sound_btn = QPushButton("🔔")
+        self.sound_btn.setCheckable(True)
+        self.sound_btn.setFixedWidth(36)
+        self.sound_btn.setToolTip("Bell alerts off — click to enable")
+        self.sound_btn.toggled.connect(self._toggle_sound_alerts)
+        controls.addWidget(self.sound_btn)
+
+        self.vol_label = QLabel("Vol")
+        self.vol_label.setStyleSheet(f"color: {TEXT}; font-weight: 600;")
+        controls.addWidget(self.vol_label)
+
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(
+            _DEFAULT_ALERT_VOLUME if alert_volume is None else max(0, min(100, int(alert_volume)))
+        )
+        self.volume_slider.setFixedWidth(90)
+        self.volume_slider.setToolTip("Bell volume")
+        self.volume_slider.valueChanged.connect(self._on_volume_changed)
+        self.volume_slider.sliderReleased.connect(self._preview_bell)
+        controls.addWidget(self.volume_slider)
+
+        self.vol_value = QLabel(f"{self.volume_slider.value()}%")
+        self.vol_value.setFixedWidth(40)
+        self.vol_value.setStyleSheet(f"color: {TEXT}; font-weight: 600;")
+        controls.addWidget(self.vol_value)
+
+        self._apply_sound_ui(False)
+        if sound_alerts:
+            self.sound_btn.setChecked(True)
+        self._suppress_preview = False
 
         controls.addStretch(1)
         root.addLayout(controls)
@@ -294,6 +376,47 @@ class ScannerWindow(QMainWindow):
             self._restart_timer()
             self.refresh_now()
 
+    def _alert_volume(self) -> float:
+        return self.volume_slider.value() / 100.0
+
+    def _apply_sound_ui(self, enabled: bool) -> None:
+        self._sound_alerts = enabled
+        self.sound_btn.setText("🔔")
+        if enabled:
+            self.sound_btn.setStyleSheet(_SOUND_ON_STYLE)
+            self.sound_btn.setToolTip("Bell alerts on — ding for each new symbol")
+            label_color = TEXT
+        else:
+            self.sound_btn.setStyleSheet(_SOUND_OFF_STYLE)
+            self.sound_btn.setToolTip("Bell alerts off — click to enable")
+            label_color = TEXT_MUTED
+        self.vol_label.setStyleSheet(f"color: {label_color}; font-weight: 600;")
+        self.vol_value.setStyleSheet(f"color: {label_color}; font-weight: 600;")
+        self.volume_slider.setEnabled(True)
+
+    def _toggle_sound_alerts(self, enabled: bool) -> None:
+        self._apply_sound_ui(enabled)
+        if enabled and not self._suppress_preview:
+            self._preview_bell()
+
+    def _on_volume_changed(self, value: int) -> None:
+        self.vol_value.setText(f"{value}%")
+
+    def _preview_bell(self) -> None:
+        if self._suppress_preview or not self._sound_alerts:
+            return
+        play_bell(self._alert_volume())
+
+    def _queue_new_symbol_dings(self, count: int) -> None:
+        if not self._sound_alerts or count <= 0:
+            return
+        vol = self._alert_volume()
+        if vol <= 0:
+            return
+        n = min(count, _MAX_ALERT_DINGS)
+        for i in range(n):
+            QTimer.singleShot(i * _ALERT_DING_GAP_MS, lambda v=vol: play_bell(v))
+
     def _restart_timer(self) -> None:
         if self._paused:
             return
@@ -322,10 +445,12 @@ class ScannerWindow(QMainWindow):
         self._apply_sort(rows)
         self.model.set_rows(self._rows, highlight)
         self.table.horizontalHeader().setSortIndicator(self._sort_col, self._sort_order)
+        self._queue_new_symbol_dings(len(highlight))
         now = datetime.now().strftime("%H:%M:%S")
         self.status.setStyleSheet("color: #9ab4c8;")
+        extra = f" · {len(highlight)} new" if highlight else ""
         self.status.setText(
-            f"{len(rows)} rows · updated {now} · {elapsed * 1000:.0f} ms"
+            f"{len(rows)} rows · updated {now} · {elapsed * 1000:.0f} ms{extra}"
         )
 
     def _on_err(self, message: str) -> None:

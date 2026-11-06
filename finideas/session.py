@@ -24,6 +24,8 @@ class SessionScanner:
     screen: str = ""
     poll_seconds: int = 15
     always_on_top: bool = False
+    sound_alerts: bool = False
+    alert_volume: int = 70
     order: int = 0
 
 
@@ -89,6 +91,8 @@ def load_session() -> SessionState:
                             screen=str(item.get("screen") or ""),
                             poll_seconds=max(5, min(600, int(item.get("poll_seconds", 15)))),
                             always_on_top=bool(item.get("always_on_top", False)),
+                            sound_alerts=bool(item.get("sound_alerts", False)),
+                            alert_volume=max(0, min(100, int(item.get("alert_volume", 70)))),
                             order=int(item.get("order", i)),
                         )
                     )

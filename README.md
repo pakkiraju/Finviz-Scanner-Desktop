@@ -90,6 +90,12 @@ Do not commit or share `settings.json`, `.env`, `saved_scans.json`, or `session.
 
 ## Changelog
 
+### 2026-11-06 — Sound alerts on scanner windows
+
+- Each floating scanner has a compact **🔔** toggle (blue when on, darker when off).
+- Custom bell ding via temp WAV playback; volume slider per window.
+- Alert on/off and volume are remembered with session restore.
+
 ### 2026-11-05 — Load Config (share presets)
 
 - **Load Config** on the Presets row imports a shared `saved_scans.json` from any folder.

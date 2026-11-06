@@ -430,6 +430,8 @@ class LauncherWindow(QMainWindow):
         screen_name: str = "",
         poll_seconds: int | None = None,
         always_on_top: bool = False,
+        sound_alerts: bool = False,
+        alert_volume: int | None = None,
         persist: bool = True,
     ) -> ScannerWindow:
         win = ScannerWindow(
@@ -439,12 +441,16 @@ class LauncherWindow(QMainWindow):
             screen_name=screen_name,
             poll_seconds=poll_seconds,
             always_on_top=always_on_top,
+            sound_alerts=sound_alerts,
+            alert_volume=alert_volume,
         )
         self._next_id += 1
         self._windows.append(win)
         win.destroyed.connect(lambda _=None, w=win: self._on_closed(w))
         win.layout_changed.connect(self._persist_session)
         win.always_on_top.toggled.connect(lambda _=False: self._persist_session())
+        win.sound_btn.toggled.connect(lambda _=False: self._persist_session())
+        win.volume_slider.valueChanged.connect(lambda _=0: self._persist_session())
         win.interval_spin.valueChanged.connect(lambda _=0: self._persist_session())
         win.show()
         if persist and not self._closing_app:
@@ -496,6 +502,8 @@ class LauncherWindow(QMainWindow):
                 screen_name=entry.screen,
                 poll_seconds=entry.poll_seconds,
                 always_on_top=entry.always_on_top,
+                sound_alerts=entry.sound_alerts,
+                alert_volume=entry.alert_volume,
                 persist=False,
             )
         self._persist_session()
@@ -517,6 +525,8 @@ class LauncherWindow(QMainWindow):
                     screen=screen_name_for_widget(win),
                     poll_seconds=int(win.interval_spin.value()),
                     always_on_top=bool(win.always_on_top.isChecked()),
+                    sound_alerts=bool(win.sound_btn.isChecked()),
+                    alert_volume=int(win.volume_slider.value()),
                     order=order,
                 )
             )
